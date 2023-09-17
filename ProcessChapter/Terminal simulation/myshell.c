@@ -11,8 +11,11 @@
 #define OPT_NUM 64
 
 char lineCommand[NUM];
-char *myargv[OPT_NUM]; // Pointer array
+char *myargv[OPT_NUM]; // Pointer array to store command arguments
+int lastCode; // To store the exit code of the last executed command
+int lastSig;  // To store the signal information of the last executed command
 
+// Function to execute a command
 void executeCommand() {
     pid_t id = fork();
     assert(id != -1);
@@ -20,10 +23,15 @@ void executeCommand() {
     if (id == 0) { // Child process
         if (execvp(myargv[0], myargv) == -1) {
             perror("execvp");
+            exit(1);
         }
-        exit(1);
     } else { // Parent process
-        waitpid(id, NULL, 0); // Wait for the child process to complete
+        int status = 0;
+        pid_t ret = waitpid(id, &status, 0); // Wait for the child process to complete
+        assert(ret > 0);
+        (void)ret;
+        lastCode = (status>>8) & 0xFF;
+        lastSig = status & 0x7F;
     }
 }
 
@@ -60,6 +68,11 @@ int main() {
         // Tokenize the input and store it in myargv
         char *token = strtok(lineCommand, " ");
         int argc = 0;
+        if (token != NULL && strcmp(token, "ls") == 0) {
+            myargv[argc++] = token;
+            myargv[argc++] = (char*)"--color=auto";
+            token = strtok(NULL, " ");
+        }
         while (token != NULL && argc < OPT_NUM - 1) {
             myargv[argc++] = token;
             token = strtok(NULL, " ");
@@ -67,10 +80,34 @@ int main() {
         myargv[argc] = NULL; // Null-terminate the array
 
         if (argc > 0) {
+            if (strcmp(myargv[0], "ll") == 0) {
+                myargv[0] = (char*)"ls";
+                myargv[1] = (char*)"--color=auto";
+                myargv[2] = (char*)"-l";
+                myargv[3] = NULL;
+            } else if (strcmp(myargv[0], "cd") == 0) {
+                if (myargv[1] != NULL) {
+                    if (chdir(myargv[1]) != 0) {
+                        perror("chdir");
+                    }
+                    continue;
+                }
+            } else if (myargv[0] != NULL && myargv[1] != NULL && strcmp(myargv[0], "echo") == 0) {
+                int i = 1;
+                while (myargv[i] != NULL) {
+                    if (strcmp(myargv[i], "$?") == 0) {
+                        printf("%d, %d\n", lastCode, lastSig);
+                    } else {
+                        printf("%s ", myargv[i]);
+                    }
+                    i++;
+                }
+                printf("\n");
+                continue;
+            }
             executeCommand();
         }
     }
 
     return 0;
 }
-
